@@ -1,6 +1,8 @@
 import streamlit as st
+import certifi
 from openai import OpenAI
 from pymongo import MongoClient, ASCENDING, DESCENDING
+from urllib.parse import quote_plus, unquote_plus
 
 
 def get_required_secret(section: str, key: str) -> str:
@@ -17,6 +19,25 @@ def get_required_secret(section: str, key: str) -> str:
     return value
 
 
+def normalize_mongo_uri(uri: str) -> str:
+    """Ensure MongoDB URI user/password are RFC 3986 escaped."""
+    if "://" not in uri:
+        return uri
+
+    scheme, rest = uri.split("://", 1)
+    if "@" not in rest:
+        return uri
+
+    userinfo, host_and_path = rest.rsplit("@", 1)
+    if ":" not in userinfo:
+        return uri
+
+    username, password = userinfo.split(":", 1)
+    encoded_username = quote_plus(unquote_plus(username))
+    encoded_password = quote_plus(unquote_plus(password))
+    return f"{scheme}://{encoded_username}:{encoded_password}@{host_and_path}"
+
+
 @st.cache_resource
 def get_openai_client() -> OpenAI:
     return OpenAI(api_key=get_required_secret("openai", "api_key"))
@@ -24,7 +45,11 @@ def get_openai_client() -> OpenAI:
 
 @st.cache_resource
 def get_mongo_connection():
-    client = MongoClient(get_required_secret("mongo", "mongo_url"))
+    raw_uri = get_required_secret("mongo", "mongo_url")
+    client = MongoClient(
+        normalize_mongo_uri(raw_uri),
+        tlsCAFile=certifi.where(),
+    )
     db = client["finsight_db"]
 
     user_collection = db["user_data"]

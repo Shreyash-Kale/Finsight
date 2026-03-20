@@ -38,10 +38,13 @@ def render_register_page(*, insert_user_data, check_email_exists, hash_password)
                 st.error("Name, email, and password are required.")
                 return
 
+            normalized_email = email.strip().lower()
+            normalized_name = name.strip()
+
             data = {
-                "email": email,
+                "email": normalized_email,
                 "password": hash_password(password),
-                "name": name,
+                "name": normalized_name,
                 "monthly_budget": Decimal128(Decimal(str(budget))),
                 "monthly_income": Decimal128(Decimal(str(income))),
             }
@@ -66,10 +69,11 @@ def render_login_page(*, verify_login):
     password = st.text_input("Password", type="password")
 
     if st.button("Login", key="login_button"):
-        login = verify_login(email, password)
+        normalized_email = email.strip().lower()
+        login = verify_login(normalized_email, password)
         if login:
             st.session_state.user_logged_in = True
-            st.session_state.email = email
+            st.session_state.email = normalized_email
             st.session_state.name = login["name"]
             st.session_state.monthly_budget = float(login["monthly_budget"].to_decimal())
             st.session_state.monthly_income = float(login["monthly_income"].to_decimal())
