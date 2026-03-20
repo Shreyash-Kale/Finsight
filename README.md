@@ -66,7 +66,7 @@ app.py
 1. Clone and enter the project:
 
 ```bash
-git clone https://github.com/adph/finsight
+git clone https://github.com/Shreyash-Kale/Finsight
 cd finsight
 ```
 
