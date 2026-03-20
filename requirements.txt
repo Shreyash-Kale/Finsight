@@ -1,0 +1,5 @@
+streamlit
+openai
+pymongo
+st-theme
+instructor>=0.5.0
