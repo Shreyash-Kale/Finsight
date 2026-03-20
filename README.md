@@ -19,10 +19,41 @@ Finsight is an AI-assisted personal finance app built with Streamlit. It helps u
 
 ## Project Structure
 
-- `HCAI.py`: Main Streamlit app (UI, auth flow, dashboard, transaction workflows)
-- `ai_logic.py`: AI/risk logic (risk scoring, nudges, recommendations, insights)
+- `app.py`: Streamlit entrypoint and page routing
+- `ai/logic.py`: AI/risk logic (risk scoring, nudges, recommendations, insights)
+- `services/`: App services (`auth_service.py`, `db_service.py`, `state_service.py`, `transaction_service.py`)
+- `ui/pages/`: Page rendering modules (`auth_pages.py`, `dashboard.py`, `transaction_pages.py`)
+- `ui/components/`: Shared UI components (`sidebar.py`)
+- `config/settings.py`: Shared runtime configuration
 - `requirements.txt`: Python dependencies
 - `data/`: Study CSV files used as behavioral context references
+
+## Architecture
+
+The app follows a simple layered structure:
+
+- `app.py` routes session page state to UI page modules and wires dependencies.
+- `ui/pages/*` renders Streamlit screens.
+- `ui/components/*` contains reusable UI pieces used across pages.
+- `services/*` handles data access, authentication, session defaults, and transaction business logic.
+- `ai/logic.py` contains all OpenAI + behavioral inference logic.
+- `config/settings.py` stores shared runtime constants.
+
+Module map:
+
+```text
+app.py
+	-> ui/pages/auth_pages.py
+	-> ui/pages/dashboard.py
+	-> ui/pages/transaction_pages.py
+	-> ui/components/sidebar.py
+	-> services/auth_service.py
+	-> services/db_service.py
+	-> services/state_service.py
+	-> services/transaction_service.py
+	-> ai/logic.py
+	-> config/settings.py
+```
 
 ## Requirements
 
@@ -65,7 +96,7 @@ mongo_url = "YOUR_MONGODB_CONNECTION_STRING"
 ## Run
 
 ```bash
-streamlit run HCAI.py
+streamlit run app.py
 ```
 
 Then open the local URL shown in your terminal (usually `http://localhost:8501`).
@@ -80,5 +111,5 @@ Then open the local URL shown in your terminal (usually `http://localhost:8501`)
 
 ## Notes
 
-- Current implementation stores user passwords directly in MongoDB; this should be replaced with hashed passwords before production use.
+- Passwords are hashed before storage.
 - OpenAI and Mongo credentials are read from Streamlit secrets, not environment variables.

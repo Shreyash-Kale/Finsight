@@ -6,18 +6,16 @@ Full AI implementation integrating:
 - Cooling period + nudge generation
 """
 
-import os
 import json
 import functools
-from typing import Dict, List, Any
-from decimal import Decimal
-from datetime import datetime
+import importlib
+from typing import Any
 import streamlit as st
-import openai
-import instructor
-import pandas as pd
+
+instructor = importlib.import_module("instructor") if importlib.util.find_spec("instructor") else None
 from openai import OpenAI
 from pydantic import BaseModel
+from config.settings import OPENAI_CHAT_MODEL
 
 # ------------------------------------------------------------------------
 # Embedded behavioral insights from CSVs (pre-extracted)
@@ -56,32 +54,24 @@ Use this research to support your advice to users considering or completing a pu
 # Singleton OpenAI client setup with instructor mode
 # ------------------------------------------------------------------------
 @functools.lru_cache(maxsize=1)
-def get_clients() -> tuple[OpenAI, instructor.Instructor]:
-    api_key = st.secrets["openai"]["api_key"]
+def get_clients() -> tuple[OpenAI, Any]:
+    if instructor is None:
+        raise RuntimeError(
+            "Missing dependency 'instructor'. Install requirements with: pip install -r requirements.txt"
+        )
+
+    try:
+        api_key = st.secrets["openai"]["api_key"]
+    except Exception as exc:
+        raise RuntimeError(
+            "Missing Streamlit secret [openai].api_key. Add it in .streamlit/secrets.toml."
+        ) from exc
 
     if not api_key:
-        raise RuntimeError("OPENAI_API_KEY not set.")
+        raise RuntimeError("Empty Streamlit secret [openai].api_key.")
     client = OpenAI(api_key=api_key)
     instruct_client = instructor.from_openai(client, mode=instructor.Mode.TOOLS)
     return client, instruct_client
-
-# ------------------------------------------------------------------------
-# Helper Functions
-# ------------------------------------------------------------------------
-def _to_float(val: Any) -> float:
-    if isinstance(val, Decimal): return float(val)
-    try: return float(val.to_decimal())
-    except AttributeError: return float(val)
-
-def summarize_history(history: List[Dict[str, Any]], limit=10):
-    trimmed = history[-limit:]
-    return json.dumps([
-        {"date": t.get("date") if isinstance(t.get("date"), str) else str(t.get("date")),
-         "cat": t["category"], 
-         "amt": _to_float(t["amount"]), 
-         "status": t.get("status")}
-        for t in trimmed
-    ], separators=(',', ':'))
 
 # ------------------------------------------------------------------------
 # Pydantic Models
@@ -131,7 +121,7 @@ def analyze_transaction_impulse_risk(transaction, user_history, user_profile):
     """
 
     return instruct.chat.completions.create(
-        model="gpt-4o",
+        model=OPENAI_CHAT_MODEL,
         response_model=ImpulseRiskFactors,
         messages=[
             {"role": "system", "content": system_prompt},
@@ -139,28 +129,6 @@ def analyze_transaction_impulse_risk(transaction, user_history, user_profile):
         ]
     )
 
-def generate_theory_explanation(transaction_data, risk_assessment):
-    _, instruct = get_clients()
-    system_prompt = f"""
-{BEHAVIORAL_INSIGHTS}
-
-Provide a theory-based explanation for this {risk_assessment.risk_level} risk transaction.
-Explain the behavioral theory behind it, provide personal insights, and suggest a micro habit or tip.
-"""
-    return instruct.chat.completions.create(
-        model="gpt-4o",
-        response_model=TheoryBasedExplanation,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": json.dumps({
-                "transaction": transaction_data,
-                "assessment": risk_assessment.model_dump()
-            })}
-        ]
-    )
-
-
-# ai_logic.py  – replace generate_theory_explanation()
 def generate_theory_explanation(transaction_data, risk_assessment):
     _, instruct = get_clients()
 
@@ -174,7 +142,7 @@ Give a short rationale (1–2 sentences) and one practical micro‑habit or tip
 """
 
     return instruct.chat.completions.create(
-        model="gpt-4o",
+        model=OPENAI_CHAT_MODEL,
         response_model=TheoryBasedExplanation,
         messages=[
             {"role": "system", "content": system_prompt},
@@ -204,7 +172,7 @@ Suggest:
 3. A small action tip
 """
     return instruct.chat.completions.create(
-        model="gpt-4o",
+        model=OPENAI_CHAT_MODEL,
         response_model=CoolingPeriodRecommendation,
         messages=[{"role": "system", "content": prompt}]
     )
@@ -220,7 +188,7 @@ Write a short nudge (<160 characters) for someone about to spend ${amount} on {c
 Tone: supportive, simple, 5th-grade level.
 """
     res = client.chat.completions.create(
-        model="gpt-4o",
+        model=OPENAI_CHAT_MODEL,
         messages=[{"role": "system", "content": prompt}]
     )
     return res.choices[0].message.content.strip()
@@ -271,7 +239,7 @@ def generate_dashboard_insights(user_profile: dict, user_history: list) -> str:
     })
 
     response = client.chat.completions.create(
-        model="gpt-4o",
+        model=OPENAI_CHAT_MODEL,
         messages=[
             {"role": "system", "content": friendly_prompt},
             {"role": "user", "content": json.dumps(cleaned_data)}
@@ -280,39 +248,4 @@ def generate_dashboard_insights(user_profile: dict, user_history: list) -> str:
 
     return response.choices[0].message.content.strip()
 
-# def generate_dashboard_insights(user_profile: dict, user_history: list) -> str:
-#     try:
-#         total_spent = sum(txn["amount"] for txn in user_history if txn["status"] == "Completed")
-#         top_categories = {}
-#         for txn in user_history:
-#             if txn["status"] == "Completed":
-#                 cat = txn["category"]
-#                 top_categories[cat] = top_categories.get(cat, 0) + txn["amount"]
-#         top3 = sorted(top_categories.items(), key=lambda x: x[1], reverse=True)[:3]
-
-#         summary = (
-#             f"<p><strong>📊 Spending Summary:</strong> You've spent <strong>${total_spent:.2f}</strong> so far. "
-#             f"Top categories: {', '.join([f'{cat} (${amt:.2f})' for cat, amt in top3])}.</p>"
-#         )
-
-#         overspending = ""
-#         if total_spent > user_profile["monthly_budget"]:
-#             overspending = (
-#                 f"<p><strong>⚠️ Overspending Alert:</strong> You're over your budget of ${user_profile['monthly_budget']:.2f}. "
-#                 f"Consider pausing new discretionary expenses this week.</p>"
-#             )
-
-#         tips = (
-#             "<p><strong>✅ Tips:</strong></p>"
-#             "<ul>"
-#             "<li>Try setting weekly micro-budgets for categories like food or entertainment.</li>"
-#             "<li>Review recurring charges — there might be forgotten subscriptions.</li>"
-#             "<li>Log expenses right away to stay mindful of every dollar.</li>"
-#             "</ul>"
-#         )
-
-#         return summary + overspending + tips
-
-#     except Exception as e:
-#         return f"<p>⚠️ Insight generation failed: {str(e)}</p>"
 
