@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import streamlit as st
@@ -88,26 +89,28 @@ def get_user_transactions(txn_data_collection, email, est_timezone):
 def generate_transaction_feedback(transaction, *, email, monthly_budget, monthly_income, txn_data_collection, est_timezone):
     try:
         user_history = get_user_transactions(txn_data_collection, email, est_timezone)
-        user_profile = {
-            "monthly_budget": monthly_budget,
-            "monthly_income": monthly_income,
-        }
-
+        user_profile = {"monthly_budget": monthly_budget, "monthly_income": monthly_income}
         safe_transaction = clean_for_ai(transaction)
+
+        # ML classification — local, no API call
         risk = analyze_transaction_impulse_risk(safe_transaction, user_history, user_profile)
-        tip = generate_theory_explanation(safe_transaction, risk)
-        nudge = generate_nudge(
-            user_profile,
-            safe_transaction["category"],
-            safe_transaction["amount"],
-            risk.risk_level,
-        )
 
         if risk.risk_level.lower() == "low":
             return (
                 f"You spent ${safe_transaction['amount']} on {safe_transaction['category']}."
                 f" This seems reasonable based on your habits and budget. Keep it up!"
             )
+
+        # Run theory explanation + nudge in parallel (both depend on risk, independent of each other)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            tip_future   = pool.submit(generate_theory_explanation, safe_transaction, risk)
+            nudge_future = pool.submit(
+                generate_nudge, user_profile,
+                safe_transaction["category"], safe_transaction["amount"], risk.risk_level,
+            )
+            tip   = tip_future.result()
+            nudge = nudge_future.result()
+
         if risk.risk_level.lower() == "medium":
             return (
                 f"You just spent ${safe_transaction['amount']} on {safe_transaction['category']}."
@@ -130,15 +133,10 @@ def generate_transaction_feedback(transaction, *, email, monthly_budget, monthly
 def generate_transaction_recommendation(pending_txn, *, email, monthly_budget, monthly_income, txn_data_collection, est_timezone):
     try:
         user_history = get_user_transactions(txn_data_collection, email, est_timezone)
-        user_profile = {
-            "monthly_budget": monthly_budget,
-            "monthly_income": monthly_income,
-        }
+        user_profile = {"monthly_budget": monthly_budget, "monthly_income": monthly_income}
 
+        # ML classification — local, no API call
         risk = analyze_transaction_impulse_risk(pending_txn, user_history, user_profile)
-        cooling = generate_cooling_recommendation(user_profile, user_history)
-        tip = generate_theory_explanation(pending_txn, risk)
-        nudge = generate_nudge(user_profile, pending_txn["category"], pending_txn["amount"], risk.risk_level)
 
         if risk.risk_level.lower() == "low":
             return (
@@ -146,6 +144,19 @@ def generate_transaction_recommendation(pending_txn, *, email, monthly_budget, m
                 f"looks aligned with your usual habits. You're doing well! "
                 f"Just keep an eye on your budget balance."
             )
+
+        # Run cooling, theory explanation, and nudge in parallel (all depend on risk only)
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            cooling_future = pool.submit(generate_cooling_recommendation, user_profile, user_history)
+            tip_future     = pool.submit(generate_theory_explanation, pending_txn, risk)
+            nudge_future   = pool.submit(
+                generate_nudge, user_profile,
+                pending_txn["category"], pending_txn["amount"], risk.risk_level,
+            )
+            cooling = cooling_future.result()
+            tip     = tip_future.result()
+            nudge   = nudge_future.result()
+
         if risk.risk_level.lower() == "medium":
             return (
                 f"This expense seems okay, but there's a chance it's a bit impulsive. "

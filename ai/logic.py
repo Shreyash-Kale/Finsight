@@ -16,6 +16,7 @@ instructor = importlib.import_module("instructor") if importlib.util.find_spec("
 from openai import OpenAI
 from pydantic import BaseModel
 from config.settings import OPENAI_CHAT_MODEL
+from ai.ml_classifier import classify_impulse_risk as _ml_classify
 
 # ------------------------------------------------------------------------
 # Embedded behavioral insights from CSVs (pre-extracted)
@@ -101,32 +102,24 @@ class CoolingPeriodRecommendation(BaseModel):
 # AI Core Functions with Embedded Study Insights
 # ------------------------------------------------------------------------
 def analyze_transaction_impulse_risk(transaction, user_history, user_profile):
-    _, instruct = get_clients()
- 
-
-    system_prompt = f"""
-    {BEHAVIORAL_INSIGHTS}
-
-    You are a behavioral economics advisor helping users assess impulse risk in purchases.
-
-    Before assigning any score, consider how essential the spending category is.
-    Healthcare, Rent, and Utilities are usually essential — treat them as lower impulse-risk unless user history shows erratic patterns.
-
-    Evaluate this transaction based on:
-    - Time and frequency
-    - Spending category (with importance weight)
-    - Budget burden and emotional context
-
-    Return individual risk scores, a total score, a risk level (Low/Med/High), and a brief explanation in 2 sentences.
     """
-
-    return instruct.chat.completions.create(
-        model=OPENAI_CHAT_MODEL,
-        response_model=ImpulseRiskFactors,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": json.dumps({"transaction": transaction, "user_profile": user_profile, "history": user_history})}
-        ]
+    Classify impulse risk using the Random Forest trained on Michigan Study3 data.
+    Returns an ImpulseRiskFactors instance — no API call, sub-millisecond inference.
+    """
+    result = _ml_classify(transaction, user_profile, user_history)
+    return ImpulseRiskFactors(
+        time_pattern_risk=result["time_pattern_risk"],
+        category_risk=result["category_risk"],
+        frequency_risk=result["frequency_risk"],
+        amount_pattern_risk=result["amount_pattern_risk"],
+        budget_risk=result["budget_risk"],
+        total_risk_score=round(
+            (result["time_pattern_risk"] + result["category_risk"] +
+             result["frequency_risk"] + result["amount_pattern_risk"] +
+             result["budget_risk"]) / 5, 1
+        ),
+        risk_level=result["risk_level"],
+        explanation=result["explanation"],
     )
 
 def generate_theory_explanation(transaction_data, risk_assessment):
